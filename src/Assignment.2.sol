@@ -92,7 +92,7 @@ contract Assignment2 is Ownable {
 
         // If the address has not registered to vote,
         // escape execution.
-        if (_registeredVoters[addr] != VoterStatus.NOT_REGISTERED)
+        if (_registeredVoters[addr] == VoterStatus.NOT_REGISTERED)
             revert MustRegisterToVote();
 
         _ /* continue */;
