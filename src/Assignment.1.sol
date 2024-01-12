@@ -386,7 +386,7 @@ contract Assignment1 is Ownable, ERC20 {
      */
     function withdraw(uint256 round, uint256 amount, address recipient) external onlyOwner {
 
-        // Ensure the round we are contributing from is not an active round,
+        // Ensure the round we are withdrawing from is not an active round,
         // otherwise the contract could become insolvent if users wish to
         // have their tokens refunded.
         if (round == _currentRound) revert FailedToWithdraw();
@@ -404,6 +404,24 @@ contract Assignment1 is Ownable, ERC20 {
 
         // Track that more tokens have been extracted from the round.
         _amountWithdrawnFromRoundByOwner[round] += amount;
+
+        // Attempt to send round ether to the target `recipient`.
+        (bool success,) = recipient.call{value: amount}("");
+
+        if (!success) revert FailedToWithdraw();
+
+    }
+
+    /**
+     * @notice Permits the owner to drain the contract after the sales
+     * rounds have come to a close. 
+     * @param recipient Account to receive drained funds.
+     */
+    function drain(address recipient) external onlyOwner {
+
+        // Only permit the contract to be drained by the `owner`
+        // if the sales rounds have concluded.
+        if (_currentRound >= _rounds.length) revert FailedToWithdraw();
 
         // Attempt to send the tokens to the target `recipient`.
         (bool success,) = recipient.call{value: amount}("");
