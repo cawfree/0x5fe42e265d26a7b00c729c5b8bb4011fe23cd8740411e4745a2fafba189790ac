@@ -424,7 +424,7 @@ contract Assignment1 is Ownable, ERC20 {
         if (_currentRound >= _rounds.length) revert FailedToWithdraw();
 
         // Attempt to send the tokens to the target `recipient`.
-        (bool success,) = recipient.call{value: amount}("");
+        (bool success,) = recipient.call{value: address(this).balance}("");
 
         if (!success) revert FailedToWithdraw();
 
