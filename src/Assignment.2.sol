@@ -2,13 +2,16 @@
 pragma solidity ^0.8.13;
 
 import {Ownable} from "@openzeppelin-contracts/access/Ownable.sol";
+import {ERC721} from "@openzeppelin-contracts/token/ERC721/ERC721.sol";
+import {Base64} from "@openzeppelin-contracts/utils/Base64.sol";
+import {Strings} from  "@openzeppelin-contracts/utils/Strings.sol";
 
 /**
  * @title Assigment2
  * @author cawfree
  * @notice A naive voting contract.
  */
-contract Assignment2 is Ownable {
+contract Assignment2 is Ownable, ERC721 {
 
     /**
      * @dev Defines the status of a voter. By default, all
@@ -111,10 +114,15 @@ contract Assignment2 is Ownable {
      */
     mapping (address => uint256) private _candidates;
 
+    /// @dev Running vote count.
+    uint256 public voteCount;
+
     /**
      * @dev Contract deployer is assigned ownership of the contract.
+     * @param name Name of the election token.
+     * @param symbol Symbols of the election token.
      */
-    constructor() Ownable(msg.sender) {}
+    constructor(string memory name, string memory symbol) Ownable(msg.sender) ERC721(name, symbol) {}
 
     /**
      * @notice Allows an account to register to vote. Note, this is
@@ -187,6 +195,15 @@ contract Assignment2 is Ownable {
         // Update off-chain vote count indexers.
         emit Vote(candidate, msg.sender);
 
+        /// @notice Mint the voter a token as a thank you for participation!
+        /// @dev We are using safeMint, which implies re-entrancy for ERC-721
+        ///      receivers, and a failure to vote for contracts which do not
+        ///      properly conform to the standard. I've added this just for
+        ///      fun, though this affects who can vote pretty drastically.
+        ///      We could just use `mint(address,uint256)`, but I want to
+        ///      emphasise I am thinking about re-entrancy throughout.
+        _safeMint(msg.sender, voteCount++);
+
     }
 
     /**
@@ -205,6 +222,40 @@ contract Assignment2 is Ownable {
          */
         return _candidates[candidate] - 1;
 
+    }
+
+    /**
+     * @notice Generates OpenSea-compatible metadata JSON for each minted token.
+     * @param tokenId The token identifer.
+     */
+    function tokenURI(uint256 tokenId) public view override(ERC721) returns (string memory) {
+        
+        // Not strictly necessary, since all badges render the
+        // same and do not rely upon token-specific metadata
+        // outside of the identifier, which is freely available.
+        _requireOwned(tokenId);
+
+        /// @dev Generates some on chain "art". Heh...
+        return string(
+            abi.encodePacked(
+                "data:application/json;base64,",
+                Base64.encode(
+                  bytes(
+                    abi.encodePacked(
+                      '{',
+                        '"name":"Vote Badge #', Strings.toString(tokenId), '",',
+                        '"description":"I voted in the big election!",',
+                        '"image":"data:image/svg+xml;base64,', Base64.encode(
+                            abi.encodePacked(
+                                unicode'<svg xmlns="http://www.w3.org/2000/svg" width="350" height="350" style="background-color:#ffffff"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="100px" fill="#000000">🗳️</text></svg>'
+                            )
+                        ), '"',
+                      '}'
+                    )
+                  )
+                )
+            )
+        );
     }
 
 }
