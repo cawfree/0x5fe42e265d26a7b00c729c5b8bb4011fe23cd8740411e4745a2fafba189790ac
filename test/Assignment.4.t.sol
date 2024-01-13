@@ -172,4 +172,32 @@ contract Assignment4Test is BaseTest {
 
     }
 
+    function test_failToMeetDeadline() public {
+
+        // Here, we'll require *all* owners to agree before allowing
+        // a transaction to be executed.
+        Assignment4 multisig = new Assignment4(_getMockOwners(4), 4);
+
+        // Give the multisig some ether to play with.
+        vm.deal(address(multisig), 10 ether);
+
+        // Let's create a transaction.
+        Assignment4.Transaction memory transaction = Assignment4.Transaction(
+            _DEAD_ADDRESS /* to */,
+            "" /* data */,
+            10 ether /* value */,
+            0 /* nonce */,
+            block.timestamp /* deadline */
+        );
+
+        bytes32 transactionHash = multisig.hashTransaction(transaction);
+
+        Assignment4.Signature[] memory signatures = _getMockSignatures(4, transactionHash);
+
+        vm.warp(block.timestamp + 1);
+
+        vm.expectRevert(abi.encodeWithSignature("DeadlineMissed()"));
+            multisig.execute(transaction, signatures);
+    }
+
 }
