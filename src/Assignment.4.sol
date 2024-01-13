@@ -27,8 +27,8 @@ contract Assignment4 is EIP712 {
      */
     enum Decision {
         UNDECIDED,
-        ACCEPTED,
-        REJECTED
+        ACCEPTED /* used to explicitly re-activate a previously-cancelled transaction */,
+        REJECTED /* used to cancel a vote for transaction */
     }
 
     /**
@@ -78,6 +78,19 @@ contract Assignment4 is EIP712 {
     error FailedToQuorum();
 
     /**
+     * @dev Thrown when an invalid threshold has been specified,
+     * i.e. a threshold greater than the number of multisig owners,
+     * or a zero threshold, which would dangerously allow any
+     * caller to transact on behalf of the multisig.
+     */
+    error InvalidThreshold();
+
+    /**
+     * @dev Thrown when the array of `owners` is invalid.
+     */
+    error InvalidOwners();
+
+    /**
      * @dev Tracks the registered owners for the multisig.
      * (ownerAddress => isOwner)
      */
@@ -122,7 +135,53 @@ contract Assignment4 is EIP712 {
         _;
     }
 
-    constructor() EIP712("MultisigAssignment", "1") {}
+    /**
+     * @param owners The owners of the multisig.
+     * @param threshold The minimum number of votes required
+     * to permit a transaction to succeed.
+     */
+    constructor(address[] memory owners, uint256 threshold) EIP712("MultisigAssignment", "1") {
+
+        /**
+         * @dev Ensure the `threshold` is valid. Note, this
+         * relies greatly on the array of `owners` also being
+         * valid.
+         */
+        if (threshold == 0 || threshold > owners.length)
+            revert InvalidThreshold();
+
+        /// @dev Ensure at least a single owner.
+        if (owners.length == 0) revert InvalidOwners();
+
+        /**
+         * @dev Here we convert the array of `owners` into a mapping
+         * to ease lookups. Additionally, we perform validation of the
+         * array to prevent invalid addresses or duplicates from being
+         * specified.
+         */
+        for (uint256 i; i < owners.length;) {
+
+            // Fetch the current `owner` being onboarded.
+            address owner = owners[i];
+
+            // Ensure the owner is not the zero address.
+            if (owner == address(0)) revert InvalidOwners();
+
+            // Ensure the owner hasn't already been initialized (this
+            // would impact the viability of crossing the voting
+            // threshold).
+            if (_owners[owner]) revert InvalidOwners();
+
+            // Register the `owner`.
+            _owners[owner] = true;
+
+            unchecked { ++i; }
+        }
+
+        // Finally, assign the execution `_THRESHOLD`.
+        _THRESHOLD = threshold;
+
+    }
 
     /**
      * @notice Defines a consist interface for hashing
@@ -173,7 +232,7 @@ contract Assignment4 is EIP712 {
 
         // Loop through the signatures, taking care to
         // account for any additional approvals.
-        for (uint256 i; i < signatures.length;) {
+        for (uint256 i; i < signatures.length; i++) {
 
             // Fetch the address of the signer - make sure
             // it corresponds to a real owner.
