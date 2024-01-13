@@ -9,12 +9,6 @@ import {BaseTest} from "./utils/BaseTest.t.sol";
 
 contract Assignment4Test is BaseTest {
 
-    ///* Actor private keys. */
-    //uint256 private immutable _PK_ALICE = 1;
-    //uint256 private immutable _PK_BOB = 2;
-    //uint256 private immutable _PK_CAROL = 3;
-    //uint256 private immutable _PK_DAVE = 4;
-
     /**
      * @dev Runs through a range of pathalogical configurations
      * until settling on valid combinations of owners and thresholds.
@@ -59,7 +53,7 @@ contract Assignment4Test is BaseTest {
 
     }
 
-    function _getMockOwners(uint256 numberOfOwners) internal returns (address[] memory) {
+    function _getMockOwners(uint256 numberOfOwners) internal pure returns (address[] memory) {
 
         address[] memory owners = new address[](numberOfOwners);
 
@@ -88,7 +82,7 @@ contract Assignment4Test is BaseTest {
      * @param privateKey Key to sign using.
      * @param transactionHash The transaction hash to authenticate.
      */
-    function _signTransactionHash(uint256 privateKey, bytes32 transactionHash) internal returns (Assignment4.Signature memory) {
+    function _signTransactionHash(uint256 privateKey, bytes32 transactionHash) internal pure returns (Assignment4.Signature memory) {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, transactionHash);
         return Assignment4.Signature(v, r, s);
     }
@@ -121,6 +115,57 @@ contract Assignment4Test is BaseTest {
 
         /// @dev Now use the required number of signatures.
         signatures = _getMockSignatures(4, multisig.hashTransaction(transaction));
+        multisig.execute(transaction, signatures);
+
+        assertEq(address(multisig).balance, 0 ether);
+        assertEq(_DEAD_ADDRESS.balance, 10 ether);
+
+    }
+
+    function test_rejectTransaction() public {
+
+        // Here, we'll require *all* owners to agree before allowing
+        // a transaction to be executed.
+        Assignment4 multisig = new Assignment4(_getMockOwners(4), 4);
+
+        // Give the multisig some ether to play with.
+        vm.deal(address(multisig), 10 ether);
+
+        // Let's create a transaction.
+        Assignment4.Transaction memory transaction = Assignment4.Transaction(
+            _DEAD_ADDRESS /* to */,
+            "" /* data */,
+            10 ether /* value */,
+            0 /* nonce */,
+            block.timestamp /* deadline */
+        );
+
+        bytes32 transactionHash = multisig.hashTransaction(transaction);
+
+        // As the first vault owner, reject this transaction.
+        vm.prank(vm.addr(1));
+            multisig.updateDecision(transactionHash, Assignment4.Decision.REJECTED);
+
+        // Next, attempt to execute the transaction with a complete
+        // range of signatures from all addresses. Because the first
+        // owner has rejected this transaction on-chain, it should
+        // not be allowed to go through.
+        Assignment4.Signature[] memory signatures = _getMockSignatures(4, transactionHash);
+
+        vm.expectRevert(abi.encodeWithSignature("FailedToQuorum()"));
+            multisig.execute(transaction, signatures);
+
+        // As the first owner, let's change our mind. We aren't sure. 
+        vm.prank(vm.addr(1));
+            vm.expectRevert(abi.encodeWithSignature("ConcreteDecisionRequired()"));
+            multisig.updateDecision(transactionHash, Assignment4.Decision.UNDECIDED);
+
+        // As the first owner, we are convinced - let's let the transaction go through.
+        vm.prank(vm.addr(1));
+            multisig.updateDecision(transactionHash, Assignment4.Decision.ACCEPTED);
+
+        assertEq(_DEAD_ADDRESS.balance, 0);
+
         multisig.execute(transaction, signatures);
 
         assertEq(_DEAD_ADDRESS.balance, 10 ether);
