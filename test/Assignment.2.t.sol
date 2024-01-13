@@ -3,6 +3,4 @@ pragma solidity ^0.8.13;
 
 import {BaseTest} from "./utils/BaseTest.t.sol";
 
-contract Assignment1Test is BaseTest {
-
-}
+contract Assignment2Test is BaseTest {}

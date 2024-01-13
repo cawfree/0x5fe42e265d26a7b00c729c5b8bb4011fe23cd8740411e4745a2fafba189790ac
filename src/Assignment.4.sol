@@ -188,6 +188,7 @@ contract Assignment4 {
         uint256 deadline
     ) external payable returns (bytes memory) {
 
+        // TODO: Use a domain separator: https://eips.ethereum.org/EIPS/eip-2612
         /// @dev Compute the keccak256 hash of the transaction.
         bytes32 executeHash = keccak256(abi.encode(to, data, value, nonce, chainId, deadline));
 

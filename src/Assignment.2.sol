@@ -233,9 +233,13 @@ contract Assignment2 is Ownable, ERC721 {
         // Not strictly necessary, since all badges render the
         // same and do not rely upon token-specific metadata
         // outside of the identifier, which is freely available.
+        //
+        // However, this check would be necessary if we wanted
+        // to add token specific metadata, such as which
+        // candidate had been voted for.
         _requireOwned(tokenId);
 
-        /// @dev Generates some on chain "art". Heh...
+        /// @dev Generates some on chain "art".
         return string(
             abi.encodePacked(
                 "data:application/json;base64,",

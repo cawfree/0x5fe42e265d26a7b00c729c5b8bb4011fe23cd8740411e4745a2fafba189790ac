@@ -6,13 +6,32 @@ import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin-contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC721} from "@openzeppelin-contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title Assignment3
  * @author cawfree
- * @notice A naive fixed-rate token swap contract.
+ * @notice A naive fixed-rate token swap contract. Note, a fixed
+ * exchange rate pool has a couple of downsides versus conventional
+ * AMMs. For example, it does not follow the laws of supply and
+ * demand, leading to excessive IL. Additionally, this pool can
+ * be drained of capital, reducing liveliness, as there is no
+ * incentive mechanism for participants to take the opposing side
+ * and rebalance the pool.
  */
 contract Assignment3 is ERC20 {
+
+    /**
+     * @dev Emitted when the pool is drained for a given token.
+     * Since we are using a linear exchange rate, it is possible
+     * to empty the pool entirely. AMMs like UniswapV2 use a
+     * curve which never crosses cartesian axes - this ensures the
+     * pool may never be totally drained, and instead induces incentives
+     * for the pool's balance to be refilled.
+     * 
+     * Nothing like that here, though!
+     */
+    event Drained(address token);
 
     /**
      * @dev Thrown when a fee on transfer token is detected.
@@ -24,6 +43,13 @@ contract Assignment3 is ERC20 {
      * sufficient liquidity.
      */
     error InsufficientLiquidity();
+
+    /**
+     * @dev Defines the initial amount of liquidity that must be burned
+     * to avoid excessively small amounts of initial token issuance, which
+     * can be gamed by attackers through share inflation.
+     */
+    uint256 private immutable _INITIAL_LIQUIDITY = 1_000;
 
     /**
      * @dev We use `SafeERC20` for `IERC20`s to ensure
@@ -40,7 +66,7 @@ contract Assignment3 is ERC20 {
      * @dev Defines the fixed exchange rate - how much of token0
      * one should receive for an input amount of token1.
      */
-    uint256 private immutable _EXCHANGE_RATE_1_FOR_0;
+    uint256 private immutable _EXCHANGE_RATE_1_FOR_0 /* in_wei */;
 
     /**
      * @dev Token reserves. To ensure swap logic cannot
@@ -56,12 +82,13 @@ contract Assignment3 is ERC20 {
      * @param exchangeRate1For0 How much token1 is required for token0.
      */
     constructor(address token0, address token1, uint256 exchangeRate1For0) ERC20(
+        // Wrapped Ether/DAI
         string(abi.encodePacked(IERC20Metadata(token0).name(), "/", IERC20Metadata(token1).name())),
         string(abi.encodePacked(IERC20Metadata(token0).symbol(), "/", IERC20Metadata(token1).symbol()))
     ) {
         _TOKEN_0 = IERC20(token0);
         _TOKEN_1 = IERC20(token1);
-        _EXCHANGE_RATE_1_FOR_0 = exchangeRate1For0;
+        _EXCHANGE_RATE_1_FOR_0 = exchangeRate1For0 /* fixed_linear_exchange_rate */;
     }
 
     /**
@@ -74,8 +101,9 @@ contract Assignment3 is ERC20 {
      * caller wishes to provide.
      * @param maxToken1 The maximum amount of token1 the
      * caller wishes to provide.
+     * @return mintedLiquidity How much liquidity was minted.
      */
-    function deposit(uint256 maxToken0, uint256 maxToken1) external {
+    function mint(uint256 maxToken0, uint256 maxToken1) external returns (uint256 mintedLiquidity) {
 
         // For the specified amount of maxToken1, determine
         // how much token0 would be required from the caller.
@@ -111,28 +139,144 @@ contract Assignment3 is ERC20 {
         if (_TOKEN_1.balanceOf(address(this)) - token1BalanceBefore != token1In)
             revert FeeOnTransferTokensUnsupported();
 
+        /// @dev The initialization phase of any token management is vital.
+        if (totalSupply() == 0) {
+
+            /**
+             * @dev We want to be resistant to imbalanced initial pool shares,
+             * since a greatly imbalanced initial deposit could dilute share
+             * value. Using a geometric mean avoids this, since it counteracts
+             * extreme differences by giving less weight to extremely high values,
+             * and more weight to lower values via reduced sensitivity.
+             * 
+             * This reduces overall IL for LPs.
+             */
+            mintedLiquidity =
+                Math.sqrt(token0In * token0In + token1In * token1In) - _INITIAL_LIQUIDITY /* checked */;
+
+            /**
+             * @dev Lock the initial liquidity. OpenZeppelin's ERC20 library
+             * does not permit transfers to the zero address, so for this
+             * exercise we'll use the dead address instead. For better gas
+             * efficiency and support for transfers to the zero address, we
+             * could have used solady. 
+             */
+            _mint(0x000000000000000000000000000000000000dEaD, _INITIAL_LIQUIDITY);
+
+            // Mint the remaining `mintedLiquidity` to the LP.
+            _mint(msg.sender, mintedLiquidity);
+
+        } else {
+
+            uint256 totalSupply = totalSupply();
+
+            /**
+             * @dev For non-initial deposits, we can use the lowest of the two
+             * amounts to decide how much liquidity to deposit. This avoids
+             * incentivising price manipulation through the donation of an
+             * inflated asset (relative to the counterparty in the token pair.)
+             */
+            mintedLiquidity = Math.min(token0In * totalSupply / _reserves0, token1In * totalSupply / _reserves1);
+
+            // Mint the `mintedLiquidity` to the caller.
+            _mint(msg.sender, mintedLiquidity);
+
+        }
+        
         // Update the token reserves.
         _reserves0 += token0In;
         _reserves1 += token1In;
 
-        // Finally, we denominate liquidity provider shares in
-        // terms of the base token.
-        _mint(msg.sender, token0In);
+    }
+
+    /**
+     * @dev Swaps `token1` for `token0`.
+     * @param maxAmountIn The amount of `token1` the user wishes to trade.
+     */
+    function oneForZero(uint256 maxAmountIn) public returns (uint256 amountOut0, uint256 amountIn1) {
+
+        /**
+         * @dev We want to make sure that the amount of token1
+         * supplied by the caller can be sustained by the reserves.
+         * For the specified `maxAmountIn`, we need to pick
+         * the smallest between their desired amount and the maximum
+         * amount of token0 we can supply.
+         */
+        amountOut0 = Math.min(_reserves0, maxAmountIn * _EXCHANGE_RATE_1_FOR_0 / 1e18);
+
+        // If we don't possess sufficient liquidity, revert.
+        if (amountOut0 == 0) revert InsufficientLiquidity();
+
+        // Calculate the required amount of `token1` for the given `amountOut0`.
+        amountIn1 = amountOut0 * 1e18 / _EXCHANGE_RATE_1_FOR_0;
+
+        // Update token reserves. (Already checked.)
+        unchecked {
+            _reserves0 -= amountOut0;
+            _reserves1 += amountIn1;
+        }
+
+        // Accept these tokens from the caller.
+        _TOKEN_1.safeTransferFrom(msg.sender, address(this), amountIn1);
+
+        // Emit the tokens.
+        _TOKEN_0.safeTransfer(msg.sender, amountOut0); 
+
+        /**
+         * @dev If the pool was emptied, emit an event in the hope
+         * some byzantine actor will come along and help replenish
+         * the pool.
+         */
+        if (_reserves0 == 0) emit Drained(address(_TOKEN_0));
 
     }
 
     /**
-     * @param shares The number of pool shares to liquidate.
+     * @notice Allows liquidity providers to burn their shares
+     * and claim their ownership of the resulting reserves and
+     * accumulated fees.
      */
-    function liquidate(uint256 shares) external {
+    function burn() external {
+
         /**
-         * @dev The contract will not burn shares on the callers behalf,
-         * instead, the shares must be approved and transferred here first.
+         * @dev The contract will *never* directly burn shares
+         * on behalf of users. Instead, the shares must be explicitly
+         * transferred here first.
          */
-        IERC20(this).safeTransferFrom(msg.sender, address(this), shares);
+        uint256 shares = balanceOf(address(this));
+        uint256 totalSupply = totalSupply();
+
+        // Terminate early if there are no shares to burn.
+        if (shares == 0) revert InsufficientLiquidity();
+
+        // Fetch the current token balances.
+        uint256 balance0 = _TOKEN_0.balanceOf(address(this));
+        uint256 balance1 = _TOKEN_1.balanceOf(address(this));
+
+        /**
+         * @dev Determine their deviation from the current reserves.
+         * These values would have been accumulated from fees, malicious
+         * token donation, etc.
+         */
+        uint256 amountOut0 = balance0 * shares / totalSupply;
+        uint256 amountOut1 = balance1 * shares / totalSupply;
 
         // Burn the shares provided.
         _burn(address(this), shares);
+
+        /**
+         * @dev Reduce the total reserves in the pool independently
+         * of the accumulated fees.
+         */
+        unchecked {
+            _reserves0 -= _reserves0 * shares / totalSupply;
+            _reserves1 -= _reserves1 * shares / totalSupply;
+        }
+
+        // Finally, reward the liquidity provider the proportions
+        // of their initial deposits and their fees.
+        _TOKEN_0.safeTransfer(msg.sender, amountOut0);
+        _TOKEN_1.safeTransfer(msg.sender, amountOut1);
 
     }
 
