@@ -14,6 +14,12 @@ import {ECDSA} from "@openzeppelin-contracts/utils/cryptography/ECDSA.sol";
  */
 contract Assignment4 is EIP712 {
 
+    struct Signature {
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+    }
+
     /**
      * @dev A `Decision` defines a multisig owner's
      * vote on a given execution. By default, these
@@ -215,7 +221,7 @@ contract Assignment4 is EIP712 {
      */
     function execute(
         Transaction memory transaction,
-        bytes[] memory signatures
+        Signature[] memory signatures
     ) external payable returns (bytes memory) {
 
         // Ensure the timestamp hasn't exceeded the deadline.
@@ -234,6 +240,9 @@ contract Assignment4 is EIP712 {
         // account for any additional approvals.
         for (uint256 i; i < signatures.length; i++) {
 
+            // Fetch the current `signature`.
+            Signature memory signature = signatures[i];
+
             // Fetch the address of the signer - make sure
             // it corresponds to a real owner.
             /**
@@ -243,7 +252,7 @@ contract Assignment4 is EIP712 {
              * signature malleability, in addition to ensuring owners
              * may only increase the voting threshold by one.
              */
-            address signer = ECDSA.recover(transactionHash, signatures[i]);
+            address signer = ECDSA.recover(transactionHash, signature.v, signature.r, signature.s);
 
             // Skip if we encounter an invalid signature.
             if (signer == address(0)) continue;
