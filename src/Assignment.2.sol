@@ -248,7 +248,6 @@ contract Assignment2 is Ownable, ERC721 {
                     abi.encodePacked(
                       '{',
                         '"name":"Vote Badge #', Strings.toString(tokenId), '",',
-                        '"description":"I voted in the big election!",',
                         '"image":"data:image/svg+xml;base64,', Base64.encode(
                             abi.encodePacked(
                                 unicode'<svg xmlns="http://www.w3.org/2000/svg" width="350" height="350" style="background-color:#ffffff"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="100px" fill="#000000">🗳️</text></svg>'

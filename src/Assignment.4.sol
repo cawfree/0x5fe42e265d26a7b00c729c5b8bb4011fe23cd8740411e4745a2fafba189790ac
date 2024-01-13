@@ -297,15 +297,14 @@ contract Assignment4 is EIP712 {
      * @notice Allows a caller to vote for a specific execution outcome
      * for a transactionHash. Most transactions can merely be signed for
      * off-chain, however this is useful for cases where a multisig owner
-     * may specifically intend to revoke a previously published signature,
-     * so that historical signings submitted manually cannot revoke.
+     * may specifically intend to revoke a previously published signature.
      * @param transactionHash Hash of the transaction.
      * @param decision Vote on whether the transaction should be executed.
      * @dev May only be called by a multisig owner.
      * @dev This is susceptible to frontrunning - an attacker in the mempool
      * could detect the presence of a decision to `REJECT` a transaction,
      * and submit an existing accepted signature at a higher gas value to
-     * override it.
+     * meet quorum and override it.
      */
     function updateDecision(bytes32 transactionHash, Decision decision) external onlyMultisigOwner {
 
@@ -313,7 +312,10 @@ contract Assignment4 is EIP712 {
         // since the UNDECIDED state possesses significant semantic
         // importance when coupled with the submission of a historical
         // approval signature.
-        if (decision == Decision.UNDECIDED) revert ConcreteDecisionRequired();
+        // This also avoids potential manipulations where an attacker
+        // specifies an arbitrary `uint256` as a decision.
+        if (decision != Decision.ACCEPTED && decision != Decision.REJECTED)
+            revert ConcreteDecisionRequired();
 
         // Defer to the internal method.
         _updateDecision(transactionHash, msg.sender, decision);
