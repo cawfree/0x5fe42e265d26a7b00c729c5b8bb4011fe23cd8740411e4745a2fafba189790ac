@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: CC0-1.0
 pragma solidity ^0.8.13;
 
+import {EIP712} from "@openzeppelin-contracts/utils/cryptography/EIP712.sol";
+import {ECDSA} from "@openzeppelin-contracts/utils/cryptography/ECDSA.sol";
+
 /**
  * @title Assignment4
  * @author cawfree
@@ -9,113 +12,272 @@ pragma solidity ^0.8.13;
  * vote on a transaction hash and only reveal the contents at
  * execution time.
  */
-contract Assignment4 {
+contract Assignment4 is EIP712 {
 
     /**
-     * @dev Thrown when a duplicate owner is supplied.
+     * @dev A `Decision` defines a multisig owner's
+     * vote on a given execution. By default, these
+     * are undecided, and the transaction execution
+     * threshold may only be decided by `ACCEPTED`
+     * decision weights. We also include a `REJECTED`
+     * status, to counteract the case where a historical
+     * signature containing a valid acceptance for execution
+     * may attempt to be used to override an intentional
+     * rejection.
      */
-    error DuplicateOwner();
+    enum Decision {
+        UNDECIDED,
+        ACCEPTED,
+        REJECTED
+    }
 
     /**
-     * @dev Thrown when an invalid owner is supplied.
+     * @notice Defines a transaction object, which configures
+     * an action for the multisig to take.
+     * @param to Address to target.
+     * @param data The transaction data.
+     * @param value The amount of ether to send alongside.
+     * @param nonce The unique nonce for the transaction.
+     * @param deadline The deadline for the transaction to
+     * be executed - avoids inefficient execution.
      */
-    error InvalidOwner();
+    struct Transaction {
+        address to;
+        bytes data;
+        uint256 value;
+        uint256 nonce;
+        uint256 deadline;
+    }
 
     /**
-     * @dev Thrown when an invalid threshold is specified.
-     */
-    error InvalidThreshold();
-
-    /**
-     * @dev Thrown when a caller attempts to use an invalid
-     * nonce.
-     */
-    error InvalidNonce();
-
-    /**
-     * @dev Thrown when a transaction's deadline has passed.
-     */
-    error DeadlineMissed();
-
-    /**
-     * @dev Thrown when a caller attempts to execute a transaction
-     * whose number of votes does not exceed the threshold.
-     */
-    error ThresholdNotMet();
-
-    /**
-     * @dev Thrown when a caller is not authorized.
+     * @dev Thrown to escape access control violations.
      */
     error NotAuthorized();
 
     /**
-     * @dev The execution threshold for signature-based votes.
+     * @dev Thrown when an owner attempts to manually define
+     * their decision as UNDECIDED. This is not allowed, as
+     * UNDECIDED represents an uninitialized state.
      */
-    uint256 public immutable THRESHOLD;
+    error ConcreteDecisionRequired();
 
     /**
-     * @dev Mapping of owner addresses.
-     * (address => isOwner)
+     * @dev Thrown when a transaction attempts to reuse a nonce.
      */
-    mapping (address => bool) private _owners;
+    error CannotReplayTransaction();
+    
+    /**
+     * @dev Thrown when a transaction deadline has been missed. 
+     */
+    error DeadlineMissed();
 
     /**
-     * @dev Mapping of used nonces.
-     * (nonceId => isUsed)
+     * @dev Thrown when the multisig has failed to reach a
+     * sufficient number of votes.
      */
-    mapping (uint256 => bool) private _usedNonces;
+    error FailedToQuorum();
 
     /**
-     * @dev Mapping of owners to transaction hash votes.
-     * (owner => (transactionHash => isAccepted))
+     * @dev Tracks the registered owners for the multisig.
+     * (ownerAddress => isOwner)
      */
-    mapping(address => mapping(bytes32 => bool)) _ownerToTransactionHashAccepted;
+    mapping (address => bool) internal _owners;
 
     /**
-     * @dev Mapping of transaction hashes to number of votes.
-     * (transactionHash => numberOfVotes)
+     * @dev The voting threshold which must be exceeded in order
+     * for a transaction to be executed.
      */
-    mapping(bytes32 => uint256) private _votes;
- 
+    uint256 private immutable _THRESHOLD;
+
     /**
-     * @param owners The owners of the wallet.
-     * @param threshold The number of signatures required.
-     * @dev Note, this doesn't ensure that all of the addresses
-     * in `owners` correspond to valid EOAs - we just rely
-     * on the voting phase to filter such addresses out, since contracts
-     * cannot directly sign transaction data (although EIP-1271
-     * style support could be implemented). Additionally, we are
-     * neglecting to check if there is nonzero code length at a
-     * specified address, since this can equally be subverted via
-     * the contract constructor.
-     * 
-     * All this to say - this is a naive implementation which
-     * can result in an array of owners populated with entities incapable
-     * of signing to an extent that would exceed the `threshold`.
+     * @dev Contains a mapping between an execution hash
+     * and an owner's decision to execute that hash. By default,
+     * each transaction for each user is initialized to `UNDECIDED`.
+     * (transactionHash => (ownerAddress => decision))
      */
-    constructor(address[] memory owners, uint256 threshold) {
+    mapping (bytes32 => mapping (address => Decision)) internal _hashToOwnerDecision;
 
-        /// @dev Ensure a realistic threshold for the array provided.
-        if (owners.length == 0 || threshold == 0 || threshold > owners.length)
-            revert InvalidThreshold();
+    /**
+     * @dev Contains the number of votes for a given transactionHash.
+     * Possesses a direct correlation with owner decisions for the same
+     * hash.
+     * (bytes32 => number_of_votes)
+     */
+    mapping (bytes32 => uint256) internal _hashToAcceptanceCount;
 
-        THRESHOLD = threshold;
+    /**
+     * @dev Tracks used nonces. Prevents replay attacks.
+     */
+    mapping(uint256 => bool) internal _usedNonces;
 
-        /// @dev Iteratively include and validate the `owners`.
-        for (uint256 i; i < owners.length;) {
+    /**
+     * @dev A modifier which ensures function bodies may only
+     * be executed if `msg.sender` is an owner of the multisig.
+     */
+    modifier onlyMultisigOwner() {
 
-            // Fetch the next `owner`.
-            address owner = owners[i];
+        // If `msg.sender` isn't an owner, revert.
+        if (!_owners[msg.sender]) revert NotAuthorized();
 
-            /// @dev Ensure that a duplicate address cannot
-            /// artificially hinder the threshold.
-            if (_owners[owner]) revert DuplicateOwner();
+        _;
+    }
 
-            // Assert the current address as an owner.
-            _owners[owner] = true;
+    constructor() EIP712("MultisigAssignment", "1") {}
 
-            unchecked { ++i; }
+    /**
+     * @notice Defines a consist interface for hashing
+     * a transaction bundle as part of EIP712.
+     * @param transaction The transaction to hash.
+     */
+    function hashTransaction(Transaction memory transaction) public view returns (bytes32) {
+        /*
+         * @notice The `DOMAIN_SEPARATOR` implicitly computed here
+         * protects against replay attacks on chain forks.
+         */
+        return _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    keccak256("Transaction(address to,bytes data,uint256 value,uint256 nonce,uint256 deadline)"),
+                    transaction.to,
+                    transaction.data,
+                    transaction.value,
+                    transaction.nonce,
+                    transaction.deadline
+                )
+            )
+        );
+    }
+
+    /**
+     * @notice Executes a transaction, provided the threshold is met.
+     * @param transaction The transaction to execute.
+     * @param signatures Array of signatures to supplement on-chain
+     * decisions.
+     */
+    function execute(
+        Transaction memory transaction,
+        bytes[] memory signatures
+    ) external payable returns (bytes memory) {
+
+        // Ensure the timestamp hasn't exceeded the deadline.
+        if (block.timestamp > transaction.deadline) revert DeadlineMissed();
+
+        // Ensure the nonce hasn't already been used.
+        if (_usedNonces[transaction.nonce]) revert CannotReplayTransaction();
+
+        // Mark the nonce has used.
+        _usedNonces[transaction.nonce] = true;
+
+        // Compute the `transactionHash` that needs to be signed.
+        bytes32 transactionHash = hashTransaction(transaction);
+
+        // Loop through the signatures, taking care to
+        // account for any additional approvals.
+        for (uint256 i; i < signatures.length;) {
+
+            // Fetch the address of the signer - make sure
+            // it corresponds to a real owner.
+            /**
+             * @dev We are using the ECDSA library which is not
+             * susceptible to signature malleability. Additionally,
+             * our use of transations nonces hinder the risk of
+             * signature malleability, in addition to ensuring owners
+             * may only increase the voting threshold by one.
+             */
+            address signer = ECDSA.recover(transactionHash, signatures[i]);
+
+            // Skip if we encounter an invalid signature.
+            if (signer == address(0)) continue;
+
+            // Skip if the signer is not an owner of the vault.
+            if (!_owners[signer]) continue;
+
+            /**
+             * @dev Here we fetch the current status of the signer's
+             * vote. A signature reflecting acceptance of a transaction
+             * may only contribute to the voting weight if the signer's
+             * decision is currently `UNDECIDED`, else if these have been
+             * manually/asynchronously `APPROVED` or `REJECTED`, the
+             * historical signature will yield to that and not be applied
+             * here.
+             */
+            if (_hashToOwnerDecision[transactionHash][signer] != Decision.UNDECIDED) continue;
+
+            // Else, lets approve the transaction for the signer,
+            // implicitly incrementing the voting count by using their
+            // signature for the transaction to override their `UNDECIDED`
+            // vote.
+            _updateDecision(transactionHash, signer, Decision.ACCEPTED);
+
         }
+
+        // Ensure that we have sufficient votes for the transaction,
+        // else the multisig owners failed to quorum and we are not
+        // permitted to execute.
+        if (_hashToAcceptanceCount[transactionHash] < _THRESHOLD)
+            revert FailedToQuorum();
+
+        (bool success, bytes memory returnData) =
+            transaction.to.call{value: transaction.value}(transaction.data);
+
+        if (!success) revert(_getRevertMsg(returnData));
+
+        return returnData;
+    }
+
+    /**
+     * @notice Allows a caller to vote for a specific execution outcome
+     * for a transactionHash. Most transactions can merely be signed for
+     * off-chain, however this is useful for cases where a multisig owner
+     * may specifically intend to revoke a previously published signature,
+     * so that historical signings submitted manually cannot revoke.
+     * @param transactionHash Hash of the transaction.
+     * @param decision Vote on whether the transaction should be executed.
+     * @dev May only be called by a multisig owner.
+     * @dev This is susceptible to frontrunning - an attacker in the mempool
+     * could detect the presence of a decision to `REJECT` a transaction,
+     * and submit an existing accepted signature at a higher gas value to
+     * override it.
+     */
+    function updateDecision(bytes32 transactionHash, Decision decision) external onlyMultisigOwner {
+
+        // External callers may only specify concrete decisions,
+        // since the UNDECIDED state possesses significant semantic
+        // importance when coupled with the submission of a historical
+        // approval signature.
+        if (decision == Decision.UNDECIDED) revert ConcreteDecisionRequired();
+
+        // Defer to the internal method.
+        _updateDecision(transactionHash, msg.sender, decision);
+
+    }
+
+    /**
+     * @notice Updates a user's decision for a given transactionHash.
+     * @param transactionHash The transactionHash being voted on.
+     * @param owner The address to update the decision for.
+     * @param decision The decision the owner has made for this transaction.
+     */
+    function _updateDecision(bytes32 transactionHash, address owner, Decision decision) internal {
+
+        /**
+         * @dev Determine if the `owner` has already voted
+         * positively on this transactionHash. If so, we'll
+         * reset their vote count.
+         */
+        if (_hashToOwnerDecision[transactionHash][owner] == Decision.ACCEPTED) {
+            // Decrease the number of votes on the transaction.
+            --_hashToAcceptanceCount[transactionHash];
+        }
+
+        /**
+         * @dev If the decision is to accept the transaction,
+         * the vote count must be increased. 
+         */
+        if (decision == Decision.ACCEPTED) ++_hashToAcceptanceCount[transactionHash];
+
+        /// @dev Finally, update the current decision.
+        _hashToOwnerDecision[transactionHash][owner] = decision;
 
     }
 
@@ -132,98 +294,9 @@ contract Assignment4 {
     }
 
     /**
-     * @notice Allows a vault owner to vote on a transaction
-     * they wish to execute.
-     * @param transactionHash The hash of the transaction
-     * to be executed.
-     */
-    function accept(bytes32 transactionHash) external {
-
-        /// @dev First, ensure the caller is an owner of the vault.
-        if (!_owners[msg.sender]) revert NotAuthorized();
-
-        /// @dev Be sure to revert if they have already accepted
-        /// this transaction hash. If so, we can revert silently.
-        if (_ownerToTransactionHashAccepted[msg.sender][transactionHash]) return;
-
-        /// @dev Else, mark the transaction as accepted by the user.
-        _ownerToTransactionHashAccepted[msg.sender][transactionHash] = true;
-
-        /// @dev Increase the number of votes for this hash.
-        ++_votes[transactionHash];
-
-    }
-
-    /**
-     * @notice Enables an owner to reject a transaction. 
-     * @param transactionHash The hash of the transaction to execute.
-     */
-    function reject(bytes32 transactionHash) external {
-
-        /// @dev First, ensure the caller is an owner of the vault.
-        if (!_owners[msg.sender]) revert NotAuthorized();
-
-        /// @dev Check to see if the owner has accepted this transaction.
-        if (_ownerToTransactionHashAccepted[msg.sender][transactionHash]) {
-
-            /// @dev Else, mark the transaction as rejected by the user.
-            _ownerToTransactionHashAccepted[msg.sender][transactionHash] = false;
-
-            /// @dev Decrease the number of votes for this hash.
-            --_votes[transactionHash];
-        }
-
-    }
-
-    /**
-     * @notice Allows a transaction with a sufficient votes
-     * threshold to be executed by the vault.
-     */
-    function execute(
-        address to,
-        bytes calldata data,
-        uint256 value,
-        uint256 nonce,
-        uint256 chainId,
-        uint256 deadline
-    ) external payable returns (bytes memory) {
-
-        // TODO: Use a domain separator: https://eips.ethereum.org/EIPS/eip-2612
-        /// @dev Compute the keccak256 hash of the transaction.
-        bytes32 executeHash = keccak256(abi.encode(to, data, value, nonce, chainId, deadline));
-
-        /// @dev Ensure the number of votes for this transaction
-        /// exceeds the threshold.
-        if (_votes[executeHash] < THRESHOLD) revert ThresholdNotMet();
-
-        // If the block timestamp exceeds the deadline,
-        // we cannot execute this transaction.
-        if (block.timestamp > deadline) revert DeadlineMissed();
-
-        // Ensure this message was signed for the correct chain
-        // (avoid replay transactions).
-        require(chainId == block.chainid);
-
-        // Ensure the nonce hasn't yet been used.
-        if (_usedNonces[nonce]) revert InvalidNonce();
-
-        // Mark the nonce as used - ensure this transaction
-        // cannot be repeated, for example through malicious
-        // re-entrancy or via replay transactions.
-        _usedNonces[nonce] = true;
-
-        // Make the call.
-        (bool success, bytes memory returnData) = to.call{value: value}(data);
-
-        /// @dev If the call fails, bubble up the revert message.
-        if (!success) revert(_getRevertMsg(returnData));
-
-        return returnData;
-
-    }
-
-    /**
      * @notice This contract accepts ether.
+     * @dev Possible extensions - allow this contract
+     * to conform to the ERC-721 standard and accept NFTs.
      */
     receive() external payable { /* :) */ }
 

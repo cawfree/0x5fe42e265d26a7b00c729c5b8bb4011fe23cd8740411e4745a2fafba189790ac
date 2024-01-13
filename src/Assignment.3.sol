@@ -20,6 +20,10 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  * and rebalance the pool. One of the positive attributes of this
  * kind of pool is we don't have to worry about price slippage,
  * which reduces trader exposure to MEV.
+ * @dev Fees have not been incorporated here to meet the design
+ * spec, however the implementation model is resistant to balance
+ * manipulation exploits, and would therefore be compatible with
+ * siphoning fees from inbound swaps.
  */
 contract Assignment3 is ERC20 {
 
