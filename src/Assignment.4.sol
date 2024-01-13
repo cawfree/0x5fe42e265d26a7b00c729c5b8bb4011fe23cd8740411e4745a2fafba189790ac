@@ -17,6 +17,11 @@ contract Assignment4 {
     error DuplicateOwner();
 
     /**
+     * @dev Thrown when an invalid owner is supplied.
+     */
+    error InvalidOwner();
+
+    /**
      * @dev Thrown when an invalid threshold is specified.
      */
     error InvalidThreshold();
@@ -75,6 +80,18 @@ contract Assignment4 {
     /**
      * @param owners The owners of the wallet.
      * @param threshold The number of signatures required.
+     * @dev Note, this doesn't ensure that all of the addresses
+     * in `owners` correspond to valid EOAs - we just rely
+     * on the voting phase to filter such addresses out, since contracts
+     * cannot directly sign transaction data (although EIP-1271
+     * style support could be implemented). Additionally, we are
+     * neglecting to check if there is nonzero code length at a
+     * specified address, since this can equally be subverted via
+     * the contract constructor.
+     * 
+     * All this to say - this is a naive implementation which
+     * can result in an array of owners populated with entities incapable
+     * of signing to an extent that would exceed the `threshold`.
      */
     constructor(address[] memory owners, uint256 threshold) {
 
@@ -207,6 +224,6 @@ contract Assignment4 {
     /**
      * @notice This contract accepts ether.
      */
-    receive() external payable {}
+    receive() external payable { /* :) */ }
 
 }
