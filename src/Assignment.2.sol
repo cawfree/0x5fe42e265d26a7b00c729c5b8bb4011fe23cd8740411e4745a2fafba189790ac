@@ -197,12 +197,12 @@ contract Assignment2 is Ownable, ERC721 {
 
         /// @notice Mint the voter a token as a thank you for participation!
         /// @dev We are using safeMint, which implies re-entrancy for ERC-721
-        ///      receivers, and a failure to vote for contracts which do not
-        ///      properly conform to the standard. I've added this just for
+        ///      receivers, and a failure to vote for calling contracts which
+        ///      do not conform to the standard. I've added this just for
         ///      fun, though this affects who can vote pretty drastically.
-        ///      We could just use `mint(address,uint256)`, but I want to
+        ///      We could just use `mint(address,uint256)` - but I want to
         ///      emphasise I am thinking about re-entrancy throughout.
-        _safeMint(msg.sender, voteCount++);
+        _safeMint(msg.sender, voteCount++ /* zero_indexed */);
 
     }
 
