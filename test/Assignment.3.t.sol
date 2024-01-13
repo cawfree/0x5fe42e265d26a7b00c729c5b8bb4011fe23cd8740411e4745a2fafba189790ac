@@ -17,6 +17,7 @@ contract Assignment3Test is BaseTest {
      * mint/burn mechanics. Uses simple equal positions.
      */
     function test_simpleMintAndBurn() public {
+
         MockERC20 token0 = new MockERC20("Token0");
         MockERC20 token1 = new MockERC20("Token1");
 
@@ -123,6 +124,13 @@ contract Assignment3Test is BaseTest {
         vm.expectEmit();
             emit Assignment3.Drained(address(token0));
             pool.oneForZero(150 ether);
+
+        // Let's try to perform another swap.
+        token1.mint(address(this), 1);
+
+        vm.expectRevert(abi.encodeWithSignature("InsufficientLiquidity()"));
+            pool.oneForZero(1);
+
     }
 
 }
