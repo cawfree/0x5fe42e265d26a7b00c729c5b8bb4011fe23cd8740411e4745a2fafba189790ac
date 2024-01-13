@@ -170,6 +170,12 @@ contract Assignment4Test is BaseTest {
 
         assertEq(_DEAD_ADDRESS.balance, 10 ether);
 
+        vm.deal(address(multisig), 10 ether);
+
+        // Ensure the transaction cannot be replayed.
+        vm.expectRevert(abi.encodeWithSignature("CannotReplayTransaction()"));
+            multisig.execute(transaction, signatures);
+
     }
 
     function test_failToMeetDeadline() public {
