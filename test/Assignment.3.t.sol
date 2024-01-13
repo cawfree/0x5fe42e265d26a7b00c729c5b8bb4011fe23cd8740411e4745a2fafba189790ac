@@ -133,4 +133,63 @@ contract Assignment3Test is BaseTest {
 
     }
 
+    /**
+     * @dev Tests inverse token swaps from `token0` to `token1`.
+     * In this example, `token0` is worth half of `token1`.
+     */
+    function test_oneForZero() public {
+
+        MockERC20 token0 = new MockERC20("Token0");
+        MockERC20 token1 = new MockERC20("Token1");
+
+        Assignment3 pool = new Assignment3(
+            address(token0),
+            address(token1),
+            2e18 /* 1-for-2 */
+        );
+
+        // We'll start off with some tokens which represent
+        // the desired token balance ratio exactly.
+        token0.mint(address(this), 200 ether);
+        token1.mint(address(this), 100 ether);
+
+        // Approve the pool.
+        token0.approve(address(pool), type(uint256).max);
+        token1.approve(address(pool), type(uint256).max);
+
+        // Mint a balanced initial supply.
+        pool.mint(200 ether, 100 ether);
+
+        // Okay, let's try to swap some tokens!
+        // For 50 of token0, we should expect 25 token1.
+        token0.mint(address(this), 50 ether);
+
+        // Swap 50 ether of `token0`. We should receive 25 `token0`.
+        pool.zeroForOne(50 ether);
+
+        assertEq(token1.balanceOf(address(this)), 25 ether);
+        assertEq(token0.balanceOf(address(this)), 0);
+
+        // At this stage, the pool should have `75` ether of
+        // `token1` and `250` ether of `token0`.
+        assertEq(token0.balanceOf(address(pool)), 250 ether);
+        assertEq(token1.balanceOf(address(pool)), 75 ether);
+
+        // Let's test we can drain the pool in its entirety,
+        // which our naive AMM allows:
+        token0.mint(address(this), 150 ether);
+
+        // We have drained the pool!
+        vm.expectEmit();
+            emit Assignment3.Drained(address(token1));
+            pool.zeroForOne(150 ether);
+
+        // Let's try to perform another swap.
+        token0.mint(address(this), 1);
+
+        vm.expectRevert(abi.encodeWithSignature("InsufficientLiquidity()"));
+            pool.zeroForOne(1);
+
+    }
+
 }

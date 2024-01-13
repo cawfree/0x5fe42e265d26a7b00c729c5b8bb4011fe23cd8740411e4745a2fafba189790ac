@@ -17,7 +17,9 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  * demand, leading to excessive IL. Additionally, this pool can
  * be drained of capital, reducing liveliness, as there is no
  * incentive mechanism for participants to take the opposing side
- * and rebalance the pool.
+ * and rebalance the pool. One of the positive attributes of this
+ * kind of pool is we don't have to worry about price slippage,
+ * which reduces trader exposure to MEV.
  */
 contract Assignment3 is ERC20 {
 
@@ -190,10 +192,13 @@ contract Assignment3 is ERC20 {
     }
 
     /**
-     * @dev Swaps `token1` for `token0`.
+     * @dev Swaps `token1` for `token0`. This will try to fulfill the trade
+     * to as great an extent as possible using the remaining reserves.
      * @param maxAmountIn The amount of `token1` the user wishes to trade.
+     * @return amountOut0 The amount of `token0` received.
+     * @return amountIn1 The amount of `token1` deposited into the pool.
      */
-    function oneForZero(uint256 maxAmountIn) public returns (uint256 amountOut0, uint256 amountIn1) {
+    function oneForZero(uint256 maxAmountIn) external returns (uint256 amountOut0, uint256 amountIn1) {
 
         /**
          * @dev We want to make sure that the amount of token1
@@ -229,6 +234,45 @@ contract Assignment3 is ERC20 {
          */
         if (_reserves0 == 0) emit Drained(address(_TOKEN_0));
 
+    }
+
+    /**
+     * @dev Swaps an amount of `token0` in exchange for `token1`, following
+     * the linear exchange rate.
+     * @param maxAmountIn The maximum number of `token0` the caller is wishing
+     * to exchange.
+     * @return amountIn0 The amount of `token0` which was exchanged.
+     * @return amountOut1 The amount of `token1` which was returned.
+     */
+    function zeroForOne(uint256 maxAmountIn) external returns (uint256 amountIn0, uint256 amountOut1){
+
+        // Compute the amount of token1 we will provide.
+        amountOut1 = Math.min(
+            _reserves1,
+            maxAmountIn * 1e18 / _EXCHANGE_RATE_1_FOR_0
+        );
+
+        // If we don't possess sufficient liquidity, revert.
+        if (amountOut1 == 0) revert InsufficientLiquidity();
+
+         // Calculate the required amount of `amountIn0` for the given `amountOut1`.
+        amountIn0 = amountOut1 * _EXCHANGE_RATE_1_FOR_0 / 1e18;
+
+        /// @dev Update the reserves, (Already checked).
+        unchecked {
+            _reserves0 += amountIn0;
+            _reserves1 -= amountOut1;
+        }
+
+        // Accept these tokens from the caller.
+        _TOKEN_0.safeTransferFrom(msg.sender, address(this), amountIn0);
+
+        // Emit the tokens.
+        _TOKEN_1.safeTransfer(msg.sender, amountOut1);
+
+        /// @dev If reserves are depleted, emit the `Drained` event.
+        if (_reserves1 == 0) emit Drained(address(_TOKEN_1));
+        
     }
 
     /**
