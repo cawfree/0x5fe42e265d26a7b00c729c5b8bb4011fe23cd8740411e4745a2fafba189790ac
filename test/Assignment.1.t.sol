@@ -155,6 +155,144 @@ contract Assignment1Test is BaseTest {
 
   }
 
+  function test_partialRefund() public {
+
+    Assignment1.Round memory round = Assignment1.Round({
+      merkleRoot: "",
+      maximum: 100 ether,
+      minimumIndividual: 1 ether,
+      maximumIndividual: 100 ether
+    });
+
+    Assignment1.Round[] memory rounds = new Assignment1.Round[](1);
+    rounds[0] = round;
+
+    Assignment1 tokenSale = new Assignment1("TokenSale", "TS", rounds) /* no_revert */;
+
+    bytes32[] memory proof;
+
+    address addr = address(1);
+
+    vm.deal(addr, 75 ether);
+    vm.prank(addr);
+      tokenSale.participate{value: 75 ether}(proof);
+
+    // Awesome, let's claim some tokens!
+    vm.prank(addr);
+      tokenSale.claim(0, 50 ether, addr);
+
+    // User should now have 50 ether worth of tokens, since these
+    // are minted 1-1 with ether.
+    assertEq(tokenSale.balanceOf(addr), 50 ether);
+
+    // User hasn't claimed all their tokens, they wish to back out.
+    vm.prank(addr);
+      tokenSale.refund(addr);
+
+    // User should have received their 25 ether. Their
+    // token allocation should remain unchanged.
+    assertEq(addr.balance, 25 ether);
+    assertEq(tokenSale.balanceOf(addr), 50 ether);
+
+    // User turns malicious and tries to claim their tokens. 
+    vm.prank(addr);
+      vm.expectRevert(abi.encodeWithSignature("FailedToClaim()"));
+      tokenSale.claim(0, 25 ether, addr);
+
+    // User is annoyed. Tries to break the sale by contributing
+    // 1 wei less than the completion amount. Sice the minimum contribution
+    // is `1 ether`, that has to lock the owners out from their funding, right?
+
+    uint256 maliciousAmount = 50 ether - 1;
+    vm.deal(addr, maliciousAmount);
+
+    vm.prank(addr);
+      tokenSale.participate{value: maliciousAmount}(proof);
+
+    assertEq(address(tokenSale).balance, 100 ether - 1 wei);
+
+    // Another user comes along, sees it only costs 1 wei to participate.
+    addr = address(2);
+
+    vm.deal(addr, 1 wei);
+
+    // Check we indeed force the minimum deposit.
+    vm.prank(addr);
+      vm.expectRevert(abi.encodeWithSignature("InvalidDeposit()"));
+      tokenSale.participate{value: 1 wei}(proof);
+
+    // See if the user can close out the round using the minimum deposit.
+    vm.deal(addr, 1 ether);
+
+    vm.prank(addr);
+      tokenSale.participate{value: 1 ether}(proof);
+
+    // The round was able to be closed out! Look, the owner can drain:
+    tokenSale.drain(_DEAD_ADDRESS);
+
+    // But that seems expensive right? Hopefully they were refunded...
+    assertEq(addr.balance, 1 ether - 1 wei);
+
+  }
+
+  function test_multipleRounds() public {
+
+    Assignment1.Round memory round = Assignment1.Round({
+      merkleRoot: "",
+      maximum: 1 ether,
+      minimumIndividual: 1 ether,
+      maximumIndividual: 1 ether
+    });
+
+    Assignment1.Round[] memory rounds = new Assignment1.Round[](2);
+    rounds[0] = round;
+    rounds[1] = round;
+
+    Assignment1 tokenSale = new Assignment1("TokenSale", "TS", rounds) /* no_revert */;
+
+    bytes32[] memory proof;
+
+    vm.deal(address(1), 2 ether);
+
+    // Complete the first round.
+    vm.startPrank(address(1));
+      tokenSale.participate{value: 1 ether}(proof);
+      // Assert their tokens can be claimed.
+      tokenSale.claim(0, 1 ether, address(1));
+    vm.stopPrank();
+
+    // Check the owner cannot drain - there are more rounds to be completed.
+    vm.expectRevert(abi.encodeWithSignature("FailedToWithdraw()"));
+      tokenSale.drain(address(this));
+
+    // Check they cannot claim for a future round.
+    vm.expectRevert(abi.encodeWithSignature("FailedToWithdraw()"));
+      tokenSale.withdraw(1, 1 ether, address(this));
+
+    // Check they can claim for the closed out round.
+    tokenSale.withdraw(0, 0.5 ether, address(this));
+    tokenSale.withdraw(0, 0.5 ether, address(this));
+
+    // Complete the second round.
+    vm.startPrank(address(1));
+
+      tokenSale.participate{value: 1 ether}(proof);
+
+      // Try to claim from the first round.
+      vm.expectRevert(abi.encodeWithSignature("FailedToClaim()"));
+        tokenSale.claim(0, 1 ether, address(1));
+
+      // Try to claim from the current round.
+      tokenSale.claim(1, 0.5 ether, address(1));
+      tokenSale.claim(1, 0.5 ether, address(1));
+
+    vm.stopPrank();
+
+    // Cool. Finally, allow the owner to pull funds from the completed round.
+    tokenSale.withdraw(1, 1 ether, address(this));
+
+  }
+
   // HACK: Allow ether to be sent to this contract.
   fallback() external payable {}
 
