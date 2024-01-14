@@ -14,6 +14,12 @@ import {ECDSA} from "@openzeppelin-contracts/utils/cryptography/ECDSA.sol";
  */
 contract Assignment4 is EIP712 {
 
+    /**
+     * @dev The v, r, and s components of a signature.
+     * @param v Recovery ID.
+     * @param r Signature component (r).
+     * @param s Signature component (s).
+     */
     struct Signature {
         uint8 v;
         bytes32 r;

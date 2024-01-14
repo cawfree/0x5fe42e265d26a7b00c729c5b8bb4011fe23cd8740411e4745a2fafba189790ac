@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {console} from "forge-std/console.sol";
+import {Merkle} from "@murky/Merkle.sol";
 
 import {Assignment1} from "../src/Assignment.1.sol";
 
@@ -291,6 +292,56 @@ contract Assignment1Test is BaseTest {
     // Cool. Finally, allow the owner to pull funds from the completed round.
     tokenSale.withdraw(1, 1 ether, address(this));
 
+  }
+
+  function test_closedRounds() public {
+
+    // Initialize
+    Merkle m = new Merkle();
+
+    // Create the Merkle Tree for the closed round.
+    bytes32[] memory data = new bytes32[](4);
+    data[0] = keccak256(abi.encode(address(1)));
+    data[1] = keccak256(abi.encode(address(2)));
+    data[2] = keccak256(abi.encode(address(3)));
+    data[3] = keccak256(abi.encode(address(4)));
+
+    Assignment1.Round memory round = Assignment1.Round({
+      merkleRoot: m.getRoot(data),
+      maximum: 1 ether,
+      minimumIndividual: 1 ether,
+      maximumIndividual: 1 ether
+    });
+
+    Assignment1.Round[] memory rounds = new Assignment1.Round[](1);
+    rounds[0] = round;
+
+    Assignment1 tokenSale = new Assignment1("TokenSale", "TS", rounds) /* no_revert */;
+
+    // Try to participate as an address that is not
+    // allowlisted. 
+
+    bytes32[] memory proof;
+
+    vm.expectRevert(abi.encodeWithSignature("UnableToParticipate()"));
+      tokenSale.participate{value: 1 ether}(proof);
+
+    // Get the proof for address(1).
+    proof = m.getProof(data, 0);
+
+    // Try to steal the proof for use with an address
+    // which isn't on the allowlist.
+    vm.deal(address(5), 1 ether);
+    vm.prank(address(5));
+      vm.expectRevert(abi.encodeWithSignature("UnableToParticipate()"));
+      tokenSale.participate{value: 1 ether}(proof);
+
+    // Attempt to enter the closed round as an
+    // allowlisted caller with the correct proof.
+    vm.deal(address(1), 1 ether);
+    vm.prank(address(1));
+      tokenSale.participate{value: 1 ether}(proof);
+  
   }
 
   // HACK: Allow ether to be sent to this contract.
