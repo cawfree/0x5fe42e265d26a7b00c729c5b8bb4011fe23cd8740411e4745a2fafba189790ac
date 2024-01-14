@@ -2,194 +2,162 @@
 pragma solidity ^0.8.13;
 
 import {console} from "forge-std/console.sol";
-import {Math} from "@openzeppelin-contracts/utils/math/Math.sol";
 
-import {MockERC20} from "./mocks/Mock.ERC20.sol";
-
-import {BaseTest} from "./utils/BaseTest.t.sol";
+import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 
 import {Assignment3} from "../src/Assignment.3.sol";
 
+import {MockERC20} from "./mocks/Mock.ERC20.sol";
+import {BaseTest} from "./utils/BaseTest.t.sol";
+
 contract Assignment3Test is BaseTest {
 
-    /**
-     * @dev Sanity checks for liquidity provider position
-     * mint/burn mechanics. Uses simple equal positions.
-     */
-    function test_simpleMintAndBurn() public {
+  function _createPool(
+    uint256 exchangeRate1For0,
+    uint256 lockedLiquidity,
+    uint256 swapFeeBp
+  ) internal returns (MockERC20 token0, MockERC20 token1, Assignment3 pool) {
 
-        MockERC20 token0 = new MockERC20("Token0");
-        MockERC20 token1 = new MockERC20("Token1");
+    token0 = new MockERC20("Token0");
+    token1 = new MockERC20("Token1");
 
-        Assignment3 pool = new Assignment3(
-            address(token0),
-            address(token1),
-            1e18 /* 1-for-1 */
-        );
+    pool = new Assignment3( "TestPoolLiquidityTokens",
+      "TPLT",
+      token0,
+      token1,
+      exchangeRate1For0,
+      lockedLiquidity,
+      swapFeeBp
+    );
 
-        token0.mint(address(this), 1 ether);
-        token1.mint(address(this), 1 ether);
+  }
 
-        token0.approve(address(pool), type(uint256).max);
-        token1.approve(address(pool), type(uint256).max);
+  function test_fees() public {
 
-        uint256 mintedLiquidity = pool.mint(1 ether, 1 ether);
+    // Assume a totally balanced pool with no locked liqudity.
+    (MockERC20 token0, MockERC20 token1, Assignment3 pool) = _createPool(1e18, 0, 10_000 /* steal all swap fees */);
 
-        assertEq(token0.balanceOf(address(this)), 0);
-        assertEq(token1.balanceOf(address(this)), 0);
+    token0.mint(address(pool), 10 ether);
+    token1.mint(address(pool), 10 ether);
 
-        assertEq(token0.balanceOf(address(pool)), 1 ether);
-        assertEq(token1.balanceOf(address(pool)), 1 ether);
+    // Mint some shares.
+    (uint256 liquidity) = pool.mint(address(this), 0);
 
-        assertEq(pool.balanceOf(address(this)), mintedLiquidity);
-        assertEq(pool.balanceOf(_DEAD_ADDRESS), 1_000);
+    // Queue up some `token0` to swap into `token1`, and
+    // vice-versa. The pool architecture permits us to do
+    // this simultaneously.
+    token0.mint(address(pool), 1 ether);
+    token1.mint(address(pool), 1 ether);
 
-        vm.expectRevert(abi.encodeWithSignature("InsufficientLiquidity()"));
-            pool.burn();
+    (uint256 amount0Out, uint256 amount1Out) = pool.swap(address(this));
 
-        pool.transfer(address(pool), mintedLiquidity);
-        pool.burn();
+    // Ensure 100% fees have stolen everything.
+    assertEq(amount0Out, 0);
+    assertEq(amount1Out, 0);
 
-        // Tokens should be redeemed back in equal portions.
-        assertEq(token0.balanceOf(address(this)), token1.balanceOf(address(this)));
+    // Transfer liquidity tokens to the pool to burn.
+    pool.transfer(address(pool), liquidity);
+    pool.burn(address(this));
 
-        // Some liquidity should remain locked.
-        assertTrue(token0.balanceOf(address(pool)) > 0);
-        assertTrue(token1.balanceOf(address(pool)) > 0);
+    // Fees have been accumulated.
+    assertEq(token0.balanceOf(address(this)), 11 ether);
+    assertEq(token1.balanceOf(address(this)), 11 ether);
 
-        // By pranking as the dead address, we can assure the liquidity
-        // can be burned completely.
-        vm.startPrank(_DEAD_ADDRESS);
-            pool.transfer(address(pool), 1_000);
-            pool.burn();
-        vm.stopPrank();
+  }
 
-        // Ensure all liquidity has been burned.
-        assertTrue(token0.balanceOf(address(pool)) == 0);
-        assertTrue(token1.balanceOf(address(pool)) == 0);
+  function test_lockedLiquidity() public {
 
-        // Ensure the sum of all returned balances is expected.
-        assertEq(token0.balanceOf(_DEAD_ADDRESS) + token0.balanceOf(address(this)), 1 ether);
-        assertEq(token1.balanceOf(_DEAD_ADDRESS) + token1.balanceOf(address(this)), 1 ether);
+    // Create a pool which demands we lock `1_000` shares
+    // of liquidity to protect against inflation attacks.
+    (MockERC20 token0, MockERC20 token1, Assignment3 pool) = _createPool(1e18, 1_000, 0);
 
-    }
+    token0.mint(address(pool), 1 ether);
+    token1.mint(address(pool), 1 ether);
+    pool.mint(address(this), 0);
 
-    /**
-     * @dev Tests swaps from `token1` to `token0`. We'll use
-     * an exchange rate that `token1` is worth half of `token0`.
-     */
-    function test_zeroForOne() public {
+    // Ensure shares were burned to the dead address.
+    assertEq(pool.balanceOf(_DEAD_ADDRESS), 1_000);
 
-        MockERC20 token0 = new MockERC20("Token0");
-        MockERC20 token1 = new MockERC20("Token1");
+  }
 
-        Assignment3 pool = new Assignment3(
-            address(token0),
-            address(token1),
-            5e17 /* 2-for-1 */
-        );
+  function test_initializationParameters() public {
 
-        // We'll start off with some tokens which represent
-        // the desired token balance ratio exactly.
-        token0.mint(address(this), 100 ether);
-        token1.mint(address(this), 200 ether);
+    (IERC20 token0, IERC20 token1,) = _createPool(1e18, 0, 0);
 
-        // Approve the pool.
-        token0.approve(address(pool), type(uint256).max);
-        token1.approve(address(pool), type(uint256).max);
+    vm.expectRevert(abi.encodeWithSignature("InvalidTokens()"));
+      new Assignment3("", "", IERC20(address(0)), IERC20(address(0)), 1e18, 0, 0);
 
-        // Mint a balanced initial supply.
-        pool.mint(100 ether, 200 ether);
+    vm.expectRevert(abi.encodeWithSignature("InvalidTokens()"));
+      new Assignment3("", "", token0, IERC20(address(0)), 1e18, 0, 0);
 
-        // Okay, let's try to swap some tokens!
-        // For 50 of token1, we should expect 25 token0.
-        token1.mint(address(this), 50 ether);
+    vm.expectRevert(abi.encodeWithSignature("InvalidTokens()"));
+      new Assignment3("", "", IERC20(address(0)), token1, 1e18, 0, 0);
 
-        // Swap 50 ether of `token1`. We should receive 25 `token0`.
-        pool.oneForZero(50 ether);
+    vm.expectRevert(abi.encodeWithSignature("InvalidBasisPoints(uint256)", 10_001));
+      new Assignment3("", "", token0, token1, 1e18, 0, 10_001);
 
-        assertEq(token1.balanceOf(address(this)), 0);
-        assertEq(token0.balanceOf(address(this)), 25 ether);
+  }
 
-        // At this stage, the pool should have `75` ether of
-        // `token0` and `250` ether of `token1`.
-        assertEq(token0.balanceOf(address(pool)), 75 ether);
-        assertEq(token1.balanceOf(address(pool)), 250 ether);
+  function test_oneForZero() public {
 
-        // Let's test we can drain the pool in its entirety,
-        // which our naive AMM allows:
-        token1.mint(address(this), 150 ether);
+    // Exchange rate: 2 * token1 for 1 * token0.
+    (MockERC20 token0, MockERC20 token1, Assignment3 pool) = _createPool(5e17, 0, 0);
 
-        // We have drained the pool!
-        vm.expectEmit();
-            emit Assignment3.Drained(address(token0));
-            pool.oneForZero(150 ether);
+    token0.mint(address(pool), 1 ether);
+    token1.mint(address(pool), 2 ether);
 
-        // Let's try to perform another swap.
-        token1.mint(address(this), 1);
+    (uint256 liquidity) = pool.mint(address(this), 0);
 
-        vm.expectRevert(abi.encodeWithSignature("InsufficientLiquidity()"));
-            pool.oneForZero(1);
+    assertTrue(liquidity > 0);
 
-    }
+    // Perform a swap that drains all the token1 liquidity.
+    // This is expected since we used a fixed exchange rate.
+    token1.mint(address(pool), 2 ether);
+    vm.expectEmit();
+    emit Assignment3.Drained(address(token0));
+      (uint256 amount0Out, uint256 amount1Out) = pool.swap(_DEAD_ADDRESS);
 
-    /**
-     * @dev Tests inverse token swaps from `token0` to `token1`.
-     * In this example, `token0` is worth half of `token1`.
-     */
-    function test_oneForZero() public {
+    // Burn our shares. Without fees, we should receive all
+    // liquidity terms of `token1`.
+    pool.transfer(address(pool), liquidity);
+    pool.burn(address(this));
 
-        MockERC20 token0 = new MockERC20("Token0");
-        MockERC20 token1 = new MockERC20("Token1");
+    assertEq(token0.balanceOf(address(this)), 0);
+    assertEq(token1.balanceOf(address(this)), 4 ether);
 
-        Assignment3 pool = new Assignment3(
-            address(token0),
-            address(token1),
-            2e18 /* 1-for-2 */
-        );
+    assertEq(token0.balanceOf(_DEAD_ADDRESS), 1 ether);
 
-        // We'll start off with some tokens which represent
-        // the desired token balance ratio exactly.
-        token0.mint(address(this), 200 ether);
-        token1.mint(address(this), 100 ether);
+  }
 
-        // Approve the pool.
-        token0.approve(address(pool), type(uint256).max);
-        token1.approve(address(pool), type(uint256).max);
+  function test_zeroForOne() public {
 
-        // Mint a balanced initial supply.
-        pool.mint(200 ether, 100 ether);
+    // Exchange rate: 2 * token0 for 1 * token1.
+    (MockERC20 token0, MockERC20 token1, Assignment3 pool) = _createPool(2e18, 0, 0);
 
-        // Okay, let's try to swap some tokens!
-        // For 50 of token0, we should expect 25 token1.
-        token0.mint(address(this), 50 ether);
+    token0.mint(address(pool), 2 ether);
+    token1.mint(address(pool), 1 ether);
 
-        // Swap 50 ether of `token0`. We should receive 25 `token0`.
-        pool.zeroForOne(50 ether);
+    (uint256 liquidity) = pool.mint(address(this), 0);
 
-        assertEq(token1.balanceOf(address(this)), 25 ether);
-        assertEq(token0.balanceOf(address(this)), 0);
+    assertTrue(liquidity > 0);
 
-        // At this stage, the pool should have `75` ether of
-        // `token1` and `250` ether of `token0`.
-        assertEq(token0.balanceOf(address(pool)), 250 ether);
-        assertEq(token1.balanceOf(address(pool)), 75 ether);
+    // Perform a swap that drains all the token1 liquidity.
+    // This is expected since we used a fixed exchange rate.
+    token0.mint(address(pool), 2 ether);
+      vm.expectEmit();
+      emit Assignment3.Drained(address(token1));
+        (uint256 amount0Out, uint256 amount1Out) = pool.swap(_DEAD_ADDRESS);
 
-        // Let's test we can drain the pool in its entirety,
-        // which our naive AMM allows:
-        token0.mint(address(this), 150 ether);
+    // Burn our shares. Without fees, we should receive all
+    // liquidity terms of `token1`.
+    pool.transfer(address(pool), liquidity);
+    pool.burn(address(this));
 
-        // We have drained the pool!
-        vm.expectEmit();
-            emit Assignment3.Drained(address(token1));
-            pool.zeroForOne(150 ether);
+    assertEq(token0.balanceOf(address(this)), 4 ether);
+    assertEq(token1.balanceOf(address(this)), 0);
 
-        // Let's try to perform another swap.
-        token0.mint(address(this), 1);
+    assertEq(token1.balanceOf(_DEAD_ADDRESS), 1 ether);
 
-        vm.expectRevert(abi.encodeWithSignature("InsufficientLiquidity()"));
-            pool.zeroForOne(1);
-
-    }
+  }
 
 }
