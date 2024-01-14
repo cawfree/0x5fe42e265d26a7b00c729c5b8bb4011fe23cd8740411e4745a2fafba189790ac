@@ -66,7 +66,7 @@ contract Assignment4Test is BaseTest {
 
     }
 
-    function _getMockSignatures(uint256 numberOfOwners, bytes32 transactionHash) internal returns (Assignment4.Signature[] memory signatures) {
+    function _getMockSignatures(uint256 numberOfOwners, bytes32 transactionHash) internal pure returns (Assignment4.Signature[] memory signatures) {
         signatures = new Assignment4.Signature[](numberOfOwners);
 
         for (uint256 i; i < numberOfOwners;) {
