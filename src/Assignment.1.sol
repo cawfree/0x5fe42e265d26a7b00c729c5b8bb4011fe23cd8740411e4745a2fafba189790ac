@@ -89,10 +89,10 @@ contract Assignment1 is Ownable, ERC20 {
      * can be contributed by a participant.
      */
     struct Round {
-        bytes32 merkleRoot;       // 32
-        uint64 maximum;           // 64
-        uint64 minimumIndividual; // 64
-        uint64 maximumIndividual; // 64
+        bytes32 merkleRoot;
+        uint256 maximum;
+        uint256 minimumIndividual;
+        uint256 maximumIndividual;
     }
 
     /// @dev Defines the configuration for each round.
@@ -162,6 +162,9 @@ contract Assignment1 is Ownable, ERC20 {
             // Ensure a valid minimum.
             if (round.minimumIndividual == 0) revert InvalidRounds();
 
+            // Ensure a valid maximum.
+            if (round.maximumIndividual > round.maximum) revert InvalidRounds();
+
             // Ensure the round has realistic minimum and maximum.
             if (round.maximumIndividual < round.minimumIndividual) revert InvalidRounds();
 
@@ -185,7 +188,7 @@ contract Assignment1 is Ownable, ERC20 {
      * deposited. This may be less than intended due to restrictions on
      * round supply caps - in this case, exceess ether will be refunded.
      */
-    function particpate(bytes32[] memory proof) external payable returns (uint256 amountToDeposit) {
+    function participate(bytes32[] memory proof) external payable returns (uint256 amountToDeposit) {
 
         // First, let's fetch the current round.
         Round memory round = _rounds[_currentRound];
@@ -372,6 +375,11 @@ contract Assignment1 is Ownable, ERC20 {
             // unclaimed.
             if (!success) revert FailedToRefund();
 
+        } else {
+
+          /// @dev There are no refunds to claim.
+          revert FailedToClaim();
+
         }
 
     }
@@ -421,7 +429,7 @@ contract Assignment1 is Ownable, ERC20 {
 
         // Only permit the contract to be drained by the `owner`
         // if the sales rounds have concluded.
-        if (_currentRound >= _rounds.length) revert FailedToWithdraw();
+        if (_currentRound < _rounds.length) revert FailedToWithdraw();
 
         // Attempt to send the tokens to the target `recipient`.
         (bool success,) = recipient.call{value: address(this).balance}("");

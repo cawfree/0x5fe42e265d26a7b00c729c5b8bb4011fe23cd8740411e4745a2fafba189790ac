@@ -12,6 +12,8 @@ import {BaseTest} from "./utils/BaseTest.t.sol";
 
 contract Assignment3Test is BaseTest {
 
+  /// @dev Creates a pool, extracting the most interesting
+  /// configuration properties for testing.
   function _createPool(
     uint256 exchangeRate1For0,
     uint256 lockedLiquidity,
