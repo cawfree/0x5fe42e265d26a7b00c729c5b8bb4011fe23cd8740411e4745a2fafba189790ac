@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: CC0-1.0
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
 import {EIP712} from "@openzeppelin-contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin-contracts/utils/cryptography/ECDSA.sol";
@@ -225,6 +225,7 @@ contract Assignment4 is EIP712 {
      * @param signatures Array of signatures to supplement on-chain
      * decisions.
      */
+    // slither-disable-next-line arbitrary-send-eth
     function execute(
         Transaction memory transaction,
         Signature[] memory signatures

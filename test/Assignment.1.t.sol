@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: CC0-1.0
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
 import {console} from "forge-std/console.sol";
 import {Merkle} from "@murky/Merkle.sol";
@@ -296,10 +296,9 @@ contract Assignment1Test is BaseTest {
 
   function test_closedRounds() public {
 
-    // Initialize
     Merkle m = new Merkle();
 
-    // Create the Merkle Tree for the closed round.
+    // Initialize the Merkle Tree for a closed round.
     bytes32[] memory data = new bytes32[](4);
     data[0] = keccak256(abi.encode(address(1)));
     data[1] = keccak256(abi.encode(address(2)));
@@ -318,11 +317,10 @@ contract Assignment1Test is BaseTest {
 
     Assignment1 tokenSale = new Assignment1("TokenSale", "TS", rounds) /* no_revert */;
 
-    // Try to participate as an address that is not
-    // allowlisted. 
-
     bytes32[] memory proof;
 
+    // Try to participate as an address that is not
+    // allowlisted. 
     vm.expectRevert(abi.encodeWithSignature("UnableToParticipate()"));
       tokenSale.participate{value: 1 ether}(proof);
 
@@ -345,6 +343,6 @@ contract Assignment1Test is BaseTest {
   }
 
   // HACK: Allow ether to be sent to this contract.
-  fallback() external payable {}
+  receive() external payable {}
 
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: CC0-1.0
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
 import {console} from "forge-std/console.sol";
 
@@ -117,10 +117,10 @@ contract Assignment3Test is BaseTest {
     token1.mint(address(pool), 2 ether);
     vm.expectEmit();
     emit Assignment3.Drained(address(token0));
-      (uint256 amount0Out, uint256 amount1Out) = pool.swap(_DEAD_ADDRESS);
+      pool.swap(_DEAD_ADDRESS);
 
     // Burn our shares. Without fees, we should receive all
-    // liquidity terms of `token1`.
+    // liquidity terms of `token0`.
     pool.transfer(address(pool), liquidity);
     pool.burn(address(this));
 
@@ -148,7 +148,7 @@ contract Assignment3Test is BaseTest {
     token0.mint(address(pool), 2 ether);
       vm.expectEmit();
       emit Assignment3.Drained(address(token1));
-        (uint256 amount0Out, uint256 amount1Out) = pool.swap(_DEAD_ADDRESS);
+        pool.swap(_DEAD_ADDRESS);
 
     // Burn our shares. Without fees, we should receive all
     // liquidity terms of `token1`.

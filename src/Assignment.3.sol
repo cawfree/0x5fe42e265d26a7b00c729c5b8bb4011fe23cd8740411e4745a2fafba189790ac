@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: CC0-1.0
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
 import {ERC20} from "@openzeppelin-contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
@@ -139,6 +139,7 @@ contract Assignment3 is ReentrancyGuard, ERC20 {
      * @param minLiquidity The minimum amount of liquidity the `recipient`
      * should be minted. Helps counteract griefing through token donation.
      */
+    // slither-disable-next-line incorrect-equality
     function mint(address recipient, uint256 minLiquidity) external nonReentrant returns (uint256 liquidity) {
 
         /**
@@ -217,6 +218,7 @@ contract Assignment3 is ReentrancyGuard, ERC20 {
      * for liquidity providers.
      * @param recipient Receiving account for the swap.
      */
+    // slither-disable-next-line divide-before-multiply
     function swap(address recipient) external nonReentrant returns (uint256 amount0Out, uint256 amount1Out) {
 
         /**
@@ -267,6 +269,7 @@ contract Assignment3 is ReentrancyGuard, ERC20 {
     /**
      * @param recipient Address to transfer liquidity to.
      */
+    // slither-disable-next-line incorrect-equality
     function burn(address recipient) external nonReentrant returns (uint256 amount0Out, uint256 amount1Out) {
 
         /**
@@ -316,6 +319,7 @@ contract Assignment3 is ReentrancyGuard, ERC20 {
     }
 
     /** @dev Updates the pool to track the known reserves. */
+    // slither-disable-next-line incorrect-equality
     function _updateReserves(uint256 balance0, uint256 balance1) internal {
         _reserves0 = balance0;
         _reserves1 = balance1;

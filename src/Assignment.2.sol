@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: CC0-1.0
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
 import {Ownable} from "@openzeppelin-contracts/access/Ownable.sol";
 import {ERC721} from "@openzeppelin-contracts/token/ERC721/ERC721.sol";
