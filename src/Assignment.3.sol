@@ -298,8 +298,8 @@ contract Assignment3 is ReentrancyGuard, ERC20 {
          * underlying liquidity, including fees.
          */
         unchecked {
-            amount0Out = (balance0 * _totalSupply) / shares;
-            amount1Out = (balance1 * _totalSupply) / shares;
+            amount0Out = (balance0 * shares) / _totalSupply;
+            amount1Out = (balance1 * shares) / _totalSupply;
         }
 
         // Transfer redeemable `token0`.

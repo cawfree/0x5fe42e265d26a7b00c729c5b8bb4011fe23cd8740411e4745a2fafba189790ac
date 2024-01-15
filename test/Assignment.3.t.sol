@@ -34,6 +34,43 @@ contract Assignment3Test is BaseTest {
 
   }
 
+  function test_shares() public {
+
+    (MockERC20 token0, MockERC20 token1, Assignment3 pool) = _createPool(1e18, 0, 10_000 /* steal all swap fees */);
+
+    token0.mint(address(pool), 1e18);
+    token1.mint(address(pool), 1e18);
+
+    vm.prank(address(1));
+      pool.mint(address(1), 0);
+
+    token0.mint(address(pool), 5e17);
+      pool.swap(address(_DEAD_ADDRESS));
+
+    assertEq(token0.balanceOf(address(pool)), 1.5 ether);
+    assertEq(token1.balanceOf(address(pool)), 1.0 ether);
+
+    token0.mint(address(pool), 1e18);
+    token1.mint(address(pool), 1e18);
+
+    vm.prank(address(3));
+      pool.mint(address(3), 0);
+
+    vm.startPrank(address(1));
+      pool.transfer(address(pool), pool.balanceOf(address(1)));
+      pool.burn(address(1));
+    vm.stopPrank();
+
+    vm.startPrank(address(3));
+      pool.transfer(address(pool), pool.balanceOf(address(3)));
+      pool.burn(address(3));
+    vm.stopPrank();
+
+    assertEq(token0.balanceOf(address(pool)), 0);
+    assertEq(token1.balanceOf(address(pool)), 0);
+
+  }
+
   function test_fees() public {
 
     // Assume a totally balanced pool with no locked liqudity.
